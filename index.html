@@ -163,10 +163,11 @@ function addPatient() {
 
 //deleting patient
 function resetPatients() {
-    // 1. Empty the data array
+
+    // Clear patient array
     patients = [];
 
-    // 2. Reset the table HTML to only show the header row
+    // Reset table
     document.getElementById("patientTable").innerHTML = `
         <tr>
             <th>ID</th>
@@ -175,14 +176,29 @@ function resetPatients() {
         </tr>
     `;
 
-    // 3. Clear the text results
+    // Clear results
     document.getElementById("results").innerHTML = "";
 
-    // 4. Destroy the charts to clear the canvas visually
-    if (chart1) chart1.destroy();
-    if (chart2) chart2.destroy();
-    if (chart3) chart3.destroy();
-    if (chart4) chart4.destroy();
+    // Safely destroy charts
+    if (chart1 !== null) {
+        chart1.destroy();
+        chart1 = null;
+    }
+
+    if (chart2 !== null) {
+        chart2.destroy();
+        chart2 = null;
+    }
+
+    if (chart3 !== null) {
+        chart3.destroy();
+        chart3 = null;
+    }
+
+    if (chart4 !== null) {
+        chart4.destroy();
+        chart4 = null;
+    }
 }
 
 // Softmax
