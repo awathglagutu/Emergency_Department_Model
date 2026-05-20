@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ED Triage Simulation</title>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+    body {
+        font-family: Arial;
+        background: #0f172a;
+        color: #e2e8f0;
+        padding: 20px;
+    }
+
+    h1 { text-align: center; color: #38bdf8; }
+
+    .container {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+    }
+
+    /* Added grid for the 2x2 chart layout */
+    .grid-2x2 {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+    }
+
+    .card {
+        background: #1e293b;
+        padding: 15px;
+        border-radius: 12px;
+    }
+
+    input {
+        width: 100%;
+        padding: 6px;
+        margin: 4px 0;
+        box-sizing: border-box; /* Ensures inputs don't overflow the cards */
+    }
+
+    button {
+        width: 100%;
+        padding: 10px;
+        background: #38bdf8;
+        border: none;
+        cursor: pointer;
+        font-weight: bold;
+        border-radius: 4px;
+    }
+
+    table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    th, td {
+        border: 1px solid #334155;
+        padding: 6px;
+        text-align: center;
+    }
+</style>
+</head>
+
+<body>
+
+<h1>🏥 ED Triage Simulation</h1>
+
+<div class="container">
+
+<div class="card">
+    <h3>Hospital Resources</h3>
+    ICU Cap <input id="icuCap" value="5">
+    ER Cap <input id="erCap" value="12">
+    FT Cap <input id="ftCap" value="20">
+
+    <h3>Treatment Time</h3>
+    ICU Time <input id="icuTime" value="120">
+    ER Time <input id="erTime" value="45">
+    FT Time <input id="ftTime" value="20">
+
+    <h3>Current Queue Sizes</h3>
+    ICU Queue <input id="icuQueue" value="3">
+    ER Queue <input id="erQueue" value="8">
+    FT Queue <input id="ftQueue" value="10">
+
+    <h3>Parameters</h3>
+    wA <input id="wA" value="1.0">
+    wB <input id="wB" value="0.08">
+    r <input id="r" value="0.06">
+
+    <button onclick="runSimulation()" style="margin-top: 10px;">Run Simulation</button>
+</div>
+
+<div class="card">
+    <h3>Patients</h3>
+
+    <table id="patientTable">
+        <tr>
+            <th>ID</th>
+            <th>ESI</th>
+            <th>Severity</th>
+        </tr>
+    </table>
+
+    <button onclick="addPatient()" style="margin-top: 10px;">Add Patient</button>
+
+    <div id="results" style="margin-top:15px;"></div>
+</div>
+
+</div>
+
+<div class="grid-2x2" style="margin-top:20px;">
+
+    <div class="card">
+        <h3 style="text-align:center;">Patient Assignment Distribution</h3>
+        <canvas id="assignChart"></canvas>
+    </div>
+
+    <div class="card">
+        <h3 style="text-align:center;">Estimated Waiting Time per Unit</h3>
+        <canvas id="waitChart"></canvas>
+    </div>
+
+    <div class="card">
+        <h3 style="text-align:center;">Severity Before vs After</h3>
+        <canvas id="sevChart"></canvas>
+    </div>
+
+    <div class="card">
+        <h3 style="text-align:center;">Queue Distribution (Pie View)</h3>
+        <canvas id="pieChart"></canvas>
+    </div>
+
+</div>
+
+<script>
+
+let patients = [];
+
+// Global chart variables
+let chart1 = null;
+let chart2 = null;
+let chart3 = null;
+let chart4 = null;
+
+function addPatient() {
+    let id = prompt("Patient ID:");
+    if (!id) return; // Cancel if empty
+    let esi = parseFloat(prompt("ESI (1-5):"));
+    let sev = parseFloat(prompt("Severity:"));
+
+    patients.push({id, esi, sev});
+
+    let table = document.getElementById("patientTable");
+    let row = table.insertRow();
+    row.innerHTML = `<td>${id}</td><td>${esi}</td><td>${sev}</td>`;
+}
+
+// Softmax
+function softmax(arr) {
+    let max = Math.max(...arr);
+    let exps = arr.map(x => Math.exp(x - max));
+    let sum = exps.reduce((a,b)=>a+b,0);
+    return exps.map(e => e/sum);
+}
+
+function runSimulation() {
+
+    let wA = parseFloat(document.getElementById("wA").value);
+    let wB = parseFloat(document.getElementById("wB").value);
+    let r  = parseFloat(document.getElementById("r").value);
+
+    // ===== WAITING TIME (EXACT OCTAVE FORMULA) =====
+    let N = [
+        parseFloat(document.getElementById("icuQueue").value),
+        parseFloat(document.getElementById("erQueue").value),
+        parseFloat(document.getElementById("ftQueue").value)
+    ];
+
+    let T = [
+        parseFloat(document.getElementById("icuTime").value),
+        parseFloat(document.getElementById("erTime").value),
+        parseFloat(document.getElementById("ftTime").value)
+    ];
+
+    let C = [
+        parseFloat(document.getElementById("icuCap").value),
+        parseFloat(document.getElementById("erCap").value),
+        parseFloat(document.getElementById("ftCap").value)
+    ];
+
+    let W = [
+        (N[0] * T[0]) / C[0],
+        (N[1] * T[1]) / C[1],
+        (N[2] * T[2]) / C[2]
+    ];
+
+    let assigned = [0,0,0];
+    let output = "";
+
+    // Array trackers for charts
+    let initialSeverities = [];
+    let updatedSeverities = [];
+    let patientLabels = [];
+
+    patients.forEach(p => {
+
+        let S = p.sev;
+
+        // ===== Utility Model (EXACT OCTAVE) =====
+        let U_ICU = wA * S - wB * W[0];
+        let U_ER  = wA * (10 - Math.abs(S - 5)) - wB * W[1];
+        let U_FT  = wA * (10 - S) - wB * W[2];
+
+        let U = [U_ICU, U_ER, U_FT];
+
+        // ===== SoftMax =====
+        let P = softmax(U);
+
+        // ===== Max Draw =====
+        let unit = P.indexOf(Math.max(...P));
+        assigned[unit]++;
+
+        // ===== Severity Update =====
+        let newS = S + (r * W[unit]);
+
+        // Tracker Push
+        initialSeverities.push(S);
+        updatedSeverities.push(newS);
+        patientLabels.push("Pt " + p.id);
+
+        // ===== ESI Conversion (EXACT OCTAVE) =====
+        let newEsi;
+        if (newS >= 8) newEsi = 1;
+        else if (newS >= 6) newEsi = 2;
+        else if (newS >= 4) newEsi = 3;
+        else if (newS >= 2) newEsi = 4;
+        else newEsi = 5;
+
+        let status = (newEsi < p.esi)
+            ? "<span style='color:red;'>Deteriorated</span>"
+            : "<span style='color:lightgreen;'>Stable</span>";
+
+        output += `
+        <b>Patient ${p.id}</b><br>
+        ICU ${(P[0]*100).toFixed(1)}% |
+        ER ${(P[1]*100).toFixed(1)}% |
+        FT ${(P[2]*100).toFixed(1)}%<br>
+        Assigned: ${["ICU","ER","Fast Track"][unit]}<br>
+        Severity: ${S.toFixed(2)} → ${newS.toFixed(2)}<br>
+        ESI: ${p.esi} → ${newEsi} (${status})<br>
+        <hr style='border-color: #334155;'>
+        `;
+    });
+
+    document.getElementById("results").innerHTML = output;
+
+    // Call the new drawing function
+    drawCharts(assigned, W, initialSeverities, updatedSeverities, patientLabels);
+}
+
+function drawCharts(assigned, W, initialSev, updatedSev, labels) {
+
+    const units = ["ICU", "ER", "Fast Track"];
+    const colors = ["#ef4444", "#f59e0b", "#22c55e"];
+
+    // Destroy old charts (prevents canvas overlap bug)
+    if (chart1) chart1.destroy();
+    if (chart2) chart2.destroy();
+    if (chart3) chart3.destroy();
+    if (chart4) chart4.destroy();
+
+    // 1. Assignment Distribution
+    chart1 = new Chart(document.getElementById("assignChart"), {
+        type: 'bar',
+        data: {
+            labels: units,
+            datasets: [{
+                label: "Patients Assigned",
+                data: assigned,
+                backgroundColor: colors
+            }]
+        }
+    });
+
+    // 2. Waiting Time per Unit
+    chart2 = new Chart(document.getElementById("waitChart"), {
+        type: 'bar',
+        data: {
+            labels: units,
+            datasets: [{
+                label: "Waiting Time (min)",
+                data: W,
+                backgroundColor: "#38bdf8"
+            }]
+        }
+    });
+
+    // 3. Severity Before vs After
+    chart3 = new Chart(document.getElementById("sevChart"), {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: "Initial Severity",
+                    data: initialSev,
+                    borderColor: "#3b82f6",
+                    fill: false
+                },
+                {
+                    label: "Updated Severity",
+                    data: updatedSev,
+                    borderColor: "#ef4444",
+                    fill: false
+                }
+            ]
+        }
+    });
+
+    // 4. Queue Distribution (Pie)
+    chart4 = new Chart(document.getElementById("pieChart"), {
+        type: 'pie',
+        data: {
+            labels: units,
+            datasets: [{
+                data: assigned,
+                backgroundColor: colors
+            }]
+        }
+    });
+}
+
+</script>
+
+</body>
+</html>
