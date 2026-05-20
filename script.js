@@ -1,5 +1,8 @@
 function runSimulation() {
-
+    if (patients.length === 0) {
+    alert("Please add at least one patient.");
+    return;}
+    
     let wA = parseFloat(document.getElementById("wA").value);
     let wB = parseFloat(document.getElementById("wB").value);
     let r  = parseFloat(document.getElementById("r").value);
