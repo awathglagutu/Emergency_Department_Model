@@ -161,6 +161,30 @@ function addPatient() {
     row.innerHTML = `<td>${id}</td><td>${esi}</td><td>${sev}</td>`;
 }
 
+//deleting patient
+function resetPatients() {
+    // 1. Empty the data array
+    patients = [];
+
+    // 2. Reset the table HTML to only show the header row
+    document.getElementById("patientTable").innerHTML = `
+        <tr>
+            <th>ID</th>
+            <th>ESI</th>
+            <th>Severity</th>
+        </tr>
+    `;
+
+    // 3. Clear the text results
+    document.getElementById("results").innerHTML = "";
+
+    // 4. Destroy the charts to clear the canvas visually
+    if (chart1) chart1.destroy();
+    if (chart2) chart2.destroy();
+    if (chart3) chart3.destroy();
+    if (chart4) chart4.destroy();
+}
+
 // Softmax
 function softmax(arr) {
     let max = Math.max(...arr);
